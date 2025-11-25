@@ -1,6 +1,6 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { Lead, Policy } from "../types";
+import { Lead, Policy, Client, QuoteResult } from "../types";
 
 // Initialize Gemini Client
 // CRITICAL: Use process.env.API_KEY as per guidelines
@@ -72,6 +72,41 @@ export const analyzeLeadOpportunity = async (lead: Lead): Promise<string> => {
   }
 };
 
+export const analyzeClientPortfolio = async (client: Client): Promise<string> => {
+  try {
+    const prompt = `
+      Atue como um estrategista sênior de seguros e consórcios.
+      Analise a carteira deste cliente e sugira oportunidades de Cross-Sell (Venda Cruzada) e Up-Sell.
+
+      PERFIL DO CLIENTE:
+      Nome: ${client.name}
+      Produtos Atuais: ${client.products.join(', ')}
+      LTV: R$ ${client.ltv}
+      Tempo de Casa: ${client.clientSince}
+      Status: ${client.status}
+
+      REGRAS DE NEGÓCIO:
+      - Se tem Consórcio mas não Seguro de Vida -> Sugerir Seguro Prestamista/Vida para proteger a dívida.
+      - Se tem Seguro Auto -> Sugerir Seguro Residencial (fácil aceitação).
+      - Se tem Seguro Vida -> Sugerir Previdência ou Consórcio para investimento.
+      - Se status é 'risk' (risco de churn) -> Sugerir ação de relacionamento imediata (ex: verificar sinistro recente).
+
+      TAREFA:
+      Gere um parágrafo curto (max 40 palavras), direto e estratégico para o corretor ler e agir. Comece com "Estratégia:".
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+    });
+
+    return response.text || "Análise de portfólio indisponível.";
+  } catch (error) {
+    console.error("Error analyzing portfolio:", error);
+    return "Não foi possível gerar a análise de portfólio no momento.";
+  }
+};
+
 export const getQuickStatsInsight = async (leads: Lead[]): Promise<string> => {
     try {
         const totalValue = leads.reduce((acc, curr) => acc + curr.value, 0);
@@ -96,7 +131,6 @@ export const getQuickStatsInsight = async (leads: Lead[]): Promise<string> => {
     }
 };
 
-// New function for Communication Hub (Unified Inbox)
 export const generateDraftResponse = async (customerMessage: string, policyContext?: Policy): Promise<string> => {
   try {
     let contextInfo = "Sem dados de apólice vinculados.";
@@ -131,4 +165,46 @@ export const generateDraftResponse = async (customerMessage: string, policyConte
     console.error("Error generating draft:", error);
     return "Olá, recebi sua mensagem. Um momento por favor.";
   }
+};
+
+// --- OPTIMIZED: Generate Comparison Sales Pitch for Web Leads (3 Options) ---
+export const generateComparisonPitch = async (leadName: string, product: string, quotes: QuoteResult[]): Promise<string> => {
+    try {
+        // Prepare detailed context for AI
+        const quotesContext = quotes.map((q, index) => 
+            `OPÇÃO ${index + 1}: ${q.insurerName} | R$ ${q.totalPremium.toLocaleString('pt-BR', {minimumFractionDigits: 2})} | Cobertura Principal: ${q.productName}`
+        ).join('\n');
+
+        const prompt = `
+            Atue como um Consultor Elite da Acesso Master.
+            O cliente ${leadName} solicitou ${product} via Web.
+            O sistema RPA já gerou 3 arquivos PDF de propostas.
+            
+            DADOS TÉCNICOS:
+            ${quotesContext}
+
+            TAREFA:
+            Escreva uma mensagem de WhatsApp de alta conversão.
+
+            ESTRUTURA OBRIGATÓRIA:
+            1. Saudação cordial pelo nome.
+            2. "Recebi sua solicitação no site e meu sistema já cotou nas 3 melhores seguradoras."
+            3. Liste as opções com bullet points (Seguradora + Valor).
+            4. Indique CLARAMENTE a "Minha Recomendação" (escolha a de melhor custo-benefício) e diga o porquê em 5 palavras.
+            5. Finalize: "Os 3 PDFs detalhados estão em anexo. Posso emitir a opção recomendada?"
+            
+            TOM DE VOZ:
+            Seguro, Ágil, Profissional, Humano. Use emojis moderadamente.
+        `;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        return response.text || "Olá! Seguem as melhores opções que encontrei para você...";
+    } catch (error) {
+        console.error("Error generating sales pitch:", error);
+        return `Olá ${leadName}! Recebi sua solicitação. Preparei 3 opções excelentes de ${product} e estou enviando os PDFs agora. Qual delas prefere?`;
+    }
 };
